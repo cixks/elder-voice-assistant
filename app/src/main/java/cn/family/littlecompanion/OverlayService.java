@@ -49,7 +49,7 @@ public final class OverlayService extends Service {
         ball = new TextView(this);
         ball.setText("问"); ball.setTextSize(25); ball.setTextColor(Color.WHITE); ball.setGravity(Gravity.CENTER);
         ball.setBackground(Ui.background(Ui.GREEN, 100, this));
-        ball.setContentDescription("点一下说话；按住可以移动");
+        ball.setContentDescription("点一下打开麦克风；拖动可以移动");
         ball.setElevation(Ui.dp(this, 8));
         ball.setOnClickListener(view -> {
             try { startActivity(new Intent(this, AssistantActivity.class)

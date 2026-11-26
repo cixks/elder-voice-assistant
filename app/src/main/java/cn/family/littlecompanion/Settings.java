@@ -24,8 +24,18 @@ public final class Settings {
     public void putNumber(String key, int value) { prefs.edit().putInt(key, value).apply(); }
     public String baseUrl() { return get("base_url", "https://api.openai.com/v1").replaceAll("/+$", ""); }
     public String model() { return get("model", ""); }
-    public String visionModel() { return get("vision_model", "").trim().isEmpty() ? model() : get("vision_model", ""); }
-    public boolean cloudSpeech() { return bool("cloud_speech", true); }
+    public String visionModel() {
+        String value = get("vision_model", "").trim();
+        return value.isEmpty() && bool("vision_reuse", false) ? model() : value;
+    }
+    public boolean cloudSpeech() { return bool("cloud_speech", false); }
+    public String serviceUrl(String service) {
+        if ("chat".equals(service) || bool(service + "_reuse", false)) return baseUrl();
+        return get(service + "_base_url", "").trim().replaceAll("/+$", "");
+    }
+    public String serviceKey(String service) {
+        return "chat".equals(service) || bool(service + "_reuse", false) ? apiKey() : readKey(service + "_api_key");
+    }
     public float speechRate() { return number("speech_rate", 90) / 100f; }
     public boolean configured() { return !model().trim().isEmpty() && !apiKey().trim().isEmpty(); }
 
@@ -42,16 +52,23 @@ public final class Settings {
     }
 
     public void saveApiKey(String value) throws Exception {
-        if (value.trim().isEmpty()) { prefs.edit().remove("api_key").apply(); return; }
+        saveKey("api_key", value);
+    }
+
+    public void saveKey(String slot, String value) throws Exception {
+        if (value.trim().isEmpty()) { prefs.edit().remove(slot).apply(); return; }
         Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
         cipher.init(Cipher.ENCRYPT_MODE, secretKey());
         String encrypted = Base64.encodeToString(cipher.doFinal(value.getBytes(java.nio.charset.StandardCharsets.UTF_8)), Base64.NO_WRAP);
-        put("api_key", Base64.encodeToString(cipher.getIV(), Base64.NO_WRAP) + ":" + encrypted);
+        put(slot, Base64.encodeToString(cipher.getIV(), Base64.NO_WRAP) + ":" + encrypted);
     }
 
     public String apiKey() {
+        return readKey("api_key");
+    }
+    public String readKey(String slot) {
         try {
-            String[] parts = get("api_key", "").split(":");
+            String[] parts = get(slot, "").split(":");
             if (parts.length != 2) return "";
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
             cipher.init(Cipher.DECRYPT_MODE, secretKey(), new GCMParameterSpec(128, Base64.decode(parts[0], Base64.NO_WRAP)));

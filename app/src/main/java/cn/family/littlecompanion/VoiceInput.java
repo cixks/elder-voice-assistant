@@ -32,7 +32,7 @@ final class VoiceInput {
     private ApiClient api;
     private File recording;
     private Callback callback;
-    private boolean listening;
+    private boolean listening, manualStop;
     private int generation;
     private long started, lastSound;
     private boolean heardSound;
@@ -48,10 +48,10 @@ final class VoiceInput {
             callback.level(Math.min(1f, amplitude / 10000f));
             // Simple local silence detection; actual threshold needs testing on the family's handset.
             if (amplitude > 650) { lastSound = now; heardSound = true; }
-            if (now - started > 25000 || (heardSound && now - started > 1500 && now - lastSound > 1800)) {
+            if (now - started > 60000 || (!manualStop && heardSound && now - started > 1500 && now - lastSound > 1800)) {
                 finishCloud(); return;
             }
-            if (!heardSound && now - started > 9000) { fail("没听清，您再说一遍"); return; }
+            if (!manualStop && !heardSound && now - started > 9000) { fail("没听清，您再说一遍"); return; }
             handler.postDelayed(this, 120);
         }
     };
@@ -59,7 +59,12 @@ final class VoiceInput {
     VoiceInput(Context context, Settings settings) { this.context = context; this.settings = settings; }
 
     void listen(Callback callback) {
+        listen(callback, false);
+    }
+
+    void listen(Callback callback, boolean manualStop) {
         cancel(); this.callback = callback;
+        this.manualStop = manualStop;
         if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             callback.error("请先允许麦克风权限"); return;
         }
@@ -97,6 +102,7 @@ final class VoiceInput {
         catch (RuntimeException ignored) { fail("录音太短，您再说一遍"); return; }
         finally { if (recorder != null) { recorder.release(); recorder = null; } }
         final File file = recording; recording = null;
+        if (!heardSound) { file.delete(); fail("没听到声音，您再说一遍"); return; }
         final int ticket = generation;
         final Callback target = callback;
         final ApiClient request = new ApiClient(settings); api = request;
@@ -144,7 +150,11 @@ final class VoiceInput {
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "zh-CN");
         intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
-        try { recognizer.startListening(intent); handler.postDelayed(systemTimeout, 30000); }
+        if (manualStop) {
+            intent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 60000L);
+            intent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 60000L);
+        }
+        try { recognizer.startListening(intent); handler.postDelayed(systemTimeout, manualStop ? 65000 : 30000); }
         catch (RuntimeException ignored) { fail("系统语音识别暂时不可用，请改用云端识别"); }
     }
 

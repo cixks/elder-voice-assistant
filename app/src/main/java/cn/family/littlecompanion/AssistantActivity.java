@@ -12,6 +12,7 @@ import android.os.Looper;
 import android.os.ResultReceiver;
 import android.view.Gravity;
 import android.view.View;
+import android.view.MotionEvent;
 import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.LinearLayout;
@@ -32,7 +33,7 @@ public final class AssistantActivity extends Activity {
     private AssistantBrain.Intent pending;
     private ApiClient api;
     private State state = State.IDLE;
-    private boolean confirmationTurn, captureInProgress, destroyed;
+    private boolean confirmationTurn, captureInProgress, destroyed, holdingMic;
     private int generation, correctionCount;
     private static final int CAPTURE_REQUEST = 101;
     private static final int MIC_REQUEST = 102;
@@ -50,11 +51,35 @@ public final class AssistantActivity extends Activity {
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL, WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL);
         panel = Ui.column(this);
         panel.setBackground(Ui.background(Color.rgb(245, 250, 247), 24, this));
-        panel.addView(Ui.text(this, "小伴 · 点一下就能问", 15));
+        panel.addView(Ui.text(this, "小伴", 15));
         status = Ui.text(this, "准备好了", 25); panel.addView(status);
         detail = Ui.text(this, "", 18); panel.addView(detail);
-        action = Ui.button(this, "重新说话", v -> {
-            if (state == State.LISTENING || state == State.CONFIRMING) input.finish(); else begin();
+        action = Ui.button(this, "麦克风", v -> {
+            if (!settings.bool("hold_to_talk", false)) {
+                if (recordingNow()) input.finish(); else startRecording();
+            }
+        });
+        action.setTextSize(23);
+        action.setMinHeight(Ui.dp(this, 88));
+        action.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_companion, 0, 0, 0);
+        action.setCompoundDrawablePadding(Ui.dp(this, 10));
+        action.setOnTouchListener((view, event) -> {
+            if (!settings.bool("hold_to_talk", false)) return false;
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    if (state == State.IDLE && action.isEnabled()) { holdingMic = true; action.setPressed(true); startRecording(); }
+                    return true;
+                case MotionEvent.ACTION_UP:
+                    action.setPressed(false);
+                    if (holdingMic) { holdingMic = false; if (recordingNow()) input.finish(); }
+                    view.performClick();
+                    return true;
+                case MotionEvent.ACTION_CANCEL:
+                    action.setPressed(false);
+                    if (holdingMic) { holdingMic = false; input.cancel(); ready(confirmationTurn); }
+                    return true;
+                default: return true;
+            }
         });
         panel.addView(action);
         panel.addView(Ui.button(this, "取消 / 收起", v -> finish()));
@@ -82,20 +107,37 @@ public final class AssistantActivity extends Activity {
 
     private void begin() {
         cancelWork(); pending = null; correctionCount = 0;
+        confirmationTurn = false;
         if (!settings.configured()) { showSilentError("请先让家人配置接口"); return; }
-        say("您想问什么？", () -> listen(false));
+        ready(false);
+    }
+
+    private boolean recordingNow() { return state == State.LISTENING || state == State.CONFIRMING; }
+    private void startRecording() {
+        if (state != State.IDLE) return;
+        if (!settings.configured()) { showSilentError("请先让家人配置接口"); return; }
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) { ensureMicrophone(); return; }
+        listen(confirmationTurn);
+    }
+    private void ready(boolean confirming) {
+        if (destroyed || isFinishing()) return;
+        confirmationTurn = confirming;
+        setState(State.IDLE, confirming ? "请确认，或告诉我哪里不对" : "准备好了", recordingHint());
+    }
+    private String recordingHint() {
+        return settings.bool("hold_to_talk", false) ? "按住麦克风说话，松开发送" : "点麦克风开始，再点一次结束";
     }
 
     private void listen(boolean confirming) {
         if (destroyed || isFinishing()) return;
         confirmationTurn = confirming;
-        setState(confirming ? State.CONFIRMING : State.LISTENING, confirming ? "请说对、不对，或直接纠正" : "您说，我在听", "说完稍等，会自动结束");
+        setState(confirming ? State.CONFIRMING : State.LISTENING, confirming ? "请说对、不对，或直接纠正" : "正在录音", settings.bool("hold_to_talk", false) ? "松开发送" : "再点麦克风结束录音");
         input.listen(new VoiceInput.Callback() {
             @Override public void processing() { setState(State.WORKING, "正在听懂您的话", "稍等一下"); }
             @Override public void result(String words) { heard(words); }
             @Override public void error(String message) { AssistantActivity.this.error(message); }
             @Override public void level(float value) { action.setAlpha(0.7f + value * 0.3f); }
-        });
+        }, true);
     }
 
     private static String normalized(String text) { return text.replaceAll("[\\p{P}\\p{Z}\\s]", ""); }
@@ -105,16 +147,16 @@ public final class AssistantActivity extends Activity {
         if (simple.matches("(算了|不问了|取消|别说了|停止|不用了|退出)")) { finish(); return; }
         if (simple.matches("(再说一遍|再说一次|重复一下|没听清|刚刚没听见)")) {
             String last = ((CompanionApp) getApplication()).lastAnswer();
-            say(last.isEmpty() ? "还没有上一条回答，您想问什么？" : last, last.isEmpty() ? () -> listen(false) : this::finish); return;
+            say(last.isEmpty() ? "还没有上一条回答。" : last, last.isEmpty() ? () -> ready(false) : this::finish); return;
         }
         if (confirmationTurn && pending != null) {
             if (simple.matches("(对|对的|是|是的|嗯|嗯嗯|好|好的|没错|对啊|对呀|就是|就是这个|是这个|确认|可以)")) {
                 executePending(); return;
             }
             if (simple.matches("(不对|不是|错了|听错了|不|不是这个)")) {
-                say("那您再说一遍。", () -> listen(false)); return;
+                say("那您再说一遍。", () -> ready(false)); return;
             }
-            if (++correctionCount > 3) { pending = null; correctionCount = 0; say("我们重新来，您想问什么？", () -> listen(false)); return; }
+            if (++correctionCount > 3) { pending = null; correctionCount = 0; say("请重新说一遍。", () -> ready(false)); return; }
         }
         final String previous = pending == null ? "" : pending.request;
         runTask(client -> AssistantBrain.understand(client, settings, words, previous), result -> {
@@ -124,7 +166,7 @@ public final class AssistantActivity extends Activity {
                 String last = ((CompanionApp) getApplication()).lastAnswer();
                 say(last.isEmpty() ? "还没有上一条回答。" : last, this::finish); return;
             }
-            say(result.confirmation, () -> listen(true));
+            say(result.confirmation, () -> ready(true));
         });
     }
 
@@ -143,7 +185,7 @@ public final class AssistantActivity extends Activity {
             case "navigate":
                 String destination = pending.destination;
                 if (destination.trim().isEmpty() || destination.matches("(那里|那个地方|上次那个地方|某某地方|附近|那个医院|上次那个医院)")) {
-                    say("请告诉我具体地名。", () -> listen(false)); return;
+                    say("请告诉我具体地名。", () -> ready(false)); return;
                 }
                 if (destination.matches("(家|回家|我家|家里)")) {
                     destination = settings.get("home", "");
@@ -206,15 +248,21 @@ public final class AssistantActivity extends Activity {
         });
     }
 
-    private void say(String text, Runnable done) { setState(State.SPEAKING, text, "点下方按钮可以打断并重新说"); output.say(text, done); }
-    private void error(String message) { say(message, () -> setState(State.IDLE, message, "点一下重新说话")); }
+    private void say(String text, Runnable done) { holdingMic = false; setState(State.SPEAKING, text, "正在播报；可点取消收起"); output.say(text, done); }
+    private void error(String message) { holdingMic = false; say(message, () -> setState(State.IDLE, message, recordingHint())); }
     private void showSilentError(String message) { setState(State.IDLE, message, "请让家人检查设置"); }
     private void setState(State value, String title, String subtitle) {
         state = value; status.setText(title); detail.setText(subtitle); action.setAlpha(1f);
-        action.setText(value == State.LISTENING || value == State.CONFIRMING ? "我说完了" : "打断 / 重新说话");
+        boolean visible = value == State.IDLE || value == State.LISTENING || value == State.CONFIRMING;
+        action.setVisibility(visible ? View.VISIBLE : View.GONE);
+        action.setEnabled(visible && settings.configured());
+        boolean recording = value == State.LISTENING || value == State.CONFIRMING;
+        action.setText(recording ? (settings.bool("hold_to_talk", false) ? "松开发送" : "结束录音")
+                : (settings.bool("hold_to_talk", false) ? "按住说话" : "点击录音"));
+        action.setContentDescription(action.getText());
     }
     private void cancelWork() {
-        generation++; input.cancel(); output.stop();
+        generation++; holdingMic = false; input.cancel(); output.stop();
         if (api != null) { api.cancel(); api = null; }
         if (captureInProgress) { stopService(new Intent(this, ScreenCaptureService.class)); ScreenCaptureService.takeImage(); captureInProgress = false; panel.setVisibility(View.VISIBLE); }
     }
