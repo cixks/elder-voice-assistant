@@ -79,8 +79,9 @@ public final class SettingsActivity extends Activity {
         content.addView(Ui.text(this, "地图入口需要在真机确认，可能还需在地图中选择地点并点击开始导航。此版本不承诺无地图界面导航。", 14));
         field("home", "家的完整地址（建议包含城市、小区和门牌）", settings.get("home", ""), true);
         section("外观与播报");
-        content.addView(Ui.text(this, "麦克风录音方式（确认需求时同样适用）", 16));
+        content.addView(Ui.text(this, "麦克风录音方式", 16));
         recordingMode = spinner(new String[]{"点击开始，再点击结束", "按住说话，松开发送"}, settings.bool("hold_to_talk", false) ? 1 : 0);
+        content.addView(Ui.text(this, "录完后助手复述需求，再显示大勾/大叉按钮；确认不再使用语音。", 14));
         content.addView(Ui.text(this, "云端录音按按钮结束，最长60秒；系统语音服务可能自行提前结束，取决于手机实现。", 14));
         content.addView(Ui.text(this, "悬浮球大小", 16));
         size = spinner(new String[]{"标准 64", "大号 76", "特大 88"}, Math.max(0, Math.min(2, (settings.number("ball_size", 64) - 64) / 12)));
@@ -121,7 +122,7 @@ public final class SettingsActivity extends Activity {
                     }
                     catch (Exception ignored) { toast("删除失败，请重试"); }
                 }).setNegativeButton("取消", null).show()));
-        content.addView(Ui.text(this, "版本 0.2.0 · 家庭试用原型\n未包含天气查询、自动购买、付款、拨号或独立导航。API费用以服务商为准，请在服务商设置预算和额度限制。", 14));
+        content.addView(Ui.text(this, "版本 0.3.0 · 家庭试用原型\n屏幕共享首次授权后复用，关闭悬浮窗或共享通知可结束。未包含天气查询、自动购买、付款、拨号或独立导航。API费用以服务商为准，请在服务商设置预算和额度限制。", 14));
     }
 
     private void section(String title) { content.addView(Ui.text(this, "\n" + title, 22)); }

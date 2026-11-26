@@ -21,7 +21,8 @@ public final class MainActivity extends Activity {
         page.addView(Ui.text(this, "打开悬浮窗后，点悬浮球，再用麦克风说话。", 19));
         page.addView(Ui.button(this, "打开悬浮窗", v -> openOverlay()));
         page.addView(Ui.button(this, "关闭悬浮窗", v -> {
-            stopService(new Intent(this, OverlayService.class)); toast("悬浮窗已关闭");
+            stopService(new Intent(this, OverlayService.class));
+            stopService(new Intent(this, ScreenCaptureService.class)); toast("悬浮窗和屏幕共享已关闭");
         }));
         page.addView(Ui.button(this, "设置", v -> startActivity(new Intent(this, SettingsActivity.class))));
         setContentView(page);

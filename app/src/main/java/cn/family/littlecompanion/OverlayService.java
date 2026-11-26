@@ -92,6 +92,7 @@ public final class OverlayService extends Service {
         if (ball != null) { clamp(); manager.updateViewLayout(ball, params); }
     }
     @Override public void onDestroy() {
+        stopService(new Intent(this, ScreenCaptureService.class));
         if (ball != null) { manager.removeView(ball); ball = null; }
         super.onDestroy();
     }
