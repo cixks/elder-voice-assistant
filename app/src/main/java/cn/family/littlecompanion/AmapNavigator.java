@@ -89,6 +89,7 @@ final class AmapNavigator {
         ServiceSettings.getInstance().setApiKey(key);
         AMapNavi.setApiKey(app, key);
         AMapLocationClient.setApiKey(key);
+        AmapDiagnostics.recordInitialization(key);
     }
 
     static void searchDestination(Context context, Settings settings, String keyword, SearchCallback callback) {

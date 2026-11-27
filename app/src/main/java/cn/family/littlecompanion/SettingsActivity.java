@@ -84,6 +84,7 @@ public final class SettingsActivity extends Activity {
         amapPrivacy.setChecked(settings.bool("amap_privacy_agreed", false));
         content.addView(amapPrivacy);
         amapKeyField = passwordField("高德 Android API Key（留空保留原密钥）", settings.readKey("amap_api_key").trim().isEmpty());
+        content.addView(Ui.button(this, "高德诊断信息（包名 / SHA1）", v -> showAmapDiagnostics()));
         content.addView(Ui.button(this, "允许定位和通知", v -> {
             if (Build.VERSION.SDK_INT >= 33) {
                 requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION,
@@ -228,6 +229,26 @@ public final class SettingsActivity extends Activity {
         input.setSaveEnabled(false);
         content.addView(input);
         return input;
+    }
+
+    private void showAmapDiagnostics() {
+        String report = AmapDiagnostics.report(this, settings);
+        if (!amapKeyField.getText().toString().trim().isEmpty()) {
+            report = "注意：密钥输入框有尚未保存的内容，以下报告只反映已保存配置。\n\n" + report;
+        }
+        final String copiedReport = report;
+        TextView text = Ui.text(this, report, 16);
+        text.setTextIsSelectable(true);
+        int padding = Ui.dp(this, 18); text.setPadding(padding, padding, padding, padding);
+        ScrollView scroll = new ScrollView(this); scroll.addView(text);
+        new AlertDialog.Builder(this).setTitle("高德本机诊断").setView(scroll)
+                .setPositiveButton("复制诊断信息", (dialog, which) -> {
+                    android.content.ClipboardManager clipboard = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                    if (clipboard != null) {
+                        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("高德诊断信息", copiedReport));
+                        toast("已复制，不含API密钥");
+                    }
+                }).setNegativeButton("关闭", null).show();
     }
 
     private void section(String title) { content.addView(Ui.text(this, "\n" + title, 22)); }
