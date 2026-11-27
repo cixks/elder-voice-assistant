@@ -1,104 +1,51 @@
 # 小伴语音助手（家庭试用原型）
 
-原生 Android / Java，最低 Android 8.0（API 26），目标 API 35。不内置大模型、不使用 WebView，也没有第三方运行时库。选择 Java 是为了使用 Android 自带能力并减少构建插件和依赖，不影响 Kotlin 后续扩展。
+原生 Android / Java，最低 Android 8.0（API 26），目标 API 35。不内置大模型、不使用 WebView。
 
-**当前状态：0.1.0已在GitHub云端编译发布；本地0.2.0交互和接口配置修改尚未编译、未进行手机验证。** 按用户要求，进入新的 APK 编译、安装或外部依赖下载前必须停下来确认。
+**当前状态：0.3.0 已在 GitHub 云端编译发布（`trial-5-1`）；本地 0.4.0 修改尚未编译，也未进行真机验证。** 按用户要求，进入新一轮 APK 编译前必须先向用户确认；且固定签名 Secrets 配置完成后方可编译。
 
-## 后续本地修改（待编译）
+## 0.4.0 本地修改（待编译）
 
-- 理解确认改为两个并排大按钮：勾“对，继续”和叉“不对，重说”，确认阶段不收音。
-- 屏幕捕获保留用户授权会话，后续识图复用；关闭悬浮窗或通知关闭按钮结束共享，系统终止后仍需重新授权。
-- 仅请求时连接捕获输出并编码图片，空闲时断开输出surface，不保存视频；系统共享提示仍持续显示。
-- 过滤近乎纯黑画面，等待后续有效帧；受保护页面仍然无法读取。
-- 新交互和共享会话尚未编译或真机验证；截图预览工具和无地图界面导航仍未实现。
+1. **回答不自动关闭 + 重播按钮 + 点空白关闭**：
+   - 语音回答播报结束后保留面板和文字答案，显示“重新播放当前语音”按钮，可随时重听。
+   - 移除 `FLAG_NOT_TOUCH_MODAL` 并启用 `setFinishOnTouchOutside(true)`，点击面板外空白区域即可关闭窗口（不误触背后应用）。
+2. **高德无地图界面步行导航（`AmapNavigator` + `WalkNaviService`）**：
+   - 接入 `com.amap.api:navi-3dmap-location-search:latest.integration`（仅打包 `armeabi-v7a`、`arm64-v8a`）。
+   - 不加载 `AMapNaviView` 地图控件，通过 `AMapLocationClient` 城市定位、`PoiSearchV2` 地点检索（同名多结果时大按钮点选确认）和 `WalkNaviService` 定位前台服务 + `AMapNavi` 实现后台/熄屏语音步行导航。
+   - 高德 API Key 在“设置”中加密保存，运行时动态设置，不写进仓库源码；未填写高德密钥时回退外部地图入口。
+3. **固定 APK 签名支持**：
+   - `app/build.gradle` 与 `.github/workflows/build-apk.yml` 支持读取 GitHub Actions 仓库 Secrets（`SIGNING_KEYSTORE_BASE64`、`SIGNING_STORE_PASSWORD`、`SIGNING_KEY_ALIAS`、`SIGNING_KEY_PASSWORD`）进行固定签名，并在构建日志输出 `SHA1` 供高德开放平台绑定。
+   - **首次启用固定签名与旧版（`0.1.0`~`0.3.0`）临时 debug 签名不同，需卸载旧版一次；之后所有新版本即可直接覆盖安装。**
+4. **拼多多黑图诊断增强**：
+   - `ScreenCaptureService` 增加 `buffer.rewind()` 和分辨率/行距/暗像素占比/耗时诊断记录。
+   - `AssistantActivity` 截屏隐藏时同时隐藏窗口 DecorView。
+   - `SettingsActivity` 增加“截图预览测试”，支持仅内存预览捕获画面并查看诊断信息（识别是页面 `FLAG_SECURE` 防截屏还是窗口遮挡）。
 
-## 0.2.0交互修改（已云端编译）
+## 固定签名配置步骤（GitHub Secrets，不写入仓库）
 
-- 首页只保留悬浮窗开启、关闭和设置入口，所有配置集中在独立设置页。
-- 点悬浮球不播报开场白、不自动录音，先显示带麦克风图标的大按钮。
-- 设置可选“点击开始/再点结束”或“按住说话/松开发送”；原始需求和确认轮使用同一种模式。
-- 录完隐藏麦克风，助手复述结束后才重新显示，用户自行录制确认或纠正。
-- 云端录音不再用停顿自动结束，最长60秒；系统识别服务可能忽略长停顿参数而自行结束，需要真机验证。
-- 语速改为50%到150%的滑动条，步长1%，保存后下次对话生效。系统TTS对细微变化的实际支持取决于引擎。
-- 语音、识图独立配置随本次一同修改；未自动触发构建。
+在本机或任意装有 JDK 的环境中生成一次专用签名并妥善备份（勿提交到仓库）：
 
-## 已编写的功能
+```bash
+keytool -genkeypair -v -keystore littlecompanion-fixed.jks -alias littlecompanion -keyalg RSA -keysize 2048 -validity 10000
+```
 
-- 可移动悬浮球，恢复位置、调整大小、手动开关。
-- 点击启动底部语音面板，再操作麦克风录音，不播报开场白。
-- 云端语音识别，或选择系统语音识别。
-- 大模型整理需求、复述并等待明确确认；否定或纠正后重新理解。
-- 默认短回答；重复上一条、打断、取消。
-- 按需申请系统屏幕捕获许可，只抓取一帧，提交视觉模型读商品信息和价格。
-- 价格解释要求区分优惠条件、起售价、分期金额；仍需实测模型准确率，不能保证读价零错误。
-- 高德、百度、腾讯已安装状态检查和目的地入口，保存家庭地址。
-- API 密钥用 Android Keystore AES-GCM 加密，不写日志、不备份。
-- 待机不收音、不录屏；录音处理后删除，截图只在内存临时处理。
-
-## 明确不包含
-
-- 独立逐路口导航、实时位置跟踪、保证不出现地图页面。
-- 自动开始所有地图版本的导航。高德目前为地点搜索入口；百度、腾讯为步行路线入口，需要真机验证且可能需要地图内确认。
-- 天气或网页搜索工具；不能凭模型知识回答可靠实时天气。
-- 支付、购物操作、拨号、服药决定、全天唤醒、开机自启动。
-- 完整聊天历史、远程家人控制、账号系统、本地预算硬限额。
-
-## 接口要求
-
-设置中的接口地址必须为 HTTPS OpenAI 兼容基础地址，例如 `https://api.openai.com/v1`，不要填完整的 `/chat/completions`。
-
-| 能力 | 接口 / 配置 |
-|---|---|
-| 对话、意图理解 | `POST /chat/completions`，配置实际可用模型名称 |
-| 页面识别 | 同上，模型需支持 `image_url` 图片输入，可单独配置视觉模型 |
-| 云端语音 | `POST /audio/transcriptions`，multipart 音频，默认名称 `whisper-1` 只是可编辑默认值 |
-| 播报 | 手机系统中文 TTS，需要安装可用中文声音 |
-
-对话、识图、云端语音现已拆分独立地址、加密密钥和模型ID；识图、语音各自可以明确勾选沿用对话地址和密钥，默认不沿用，防止将私人数据误发到不支持该功能的服务。旧版本的对话地址和密钥继续保留，升级后需重新配置独立语音/识图服务。如果服务商只支持聊天、不支持语音，应先使用手机系统语音；系统语音也依赖目标手机有可用识别服务。新安装默认使用系统语音，已保存的开关不自动改变。此版本不自动猜测供应商差异、不跟随 HTTP 重定向，防止把密钥转发给其他站点。
-
-云端转写仅实现 OpenAI 兼容的 multipart `/audio/transcriptions` 协议，不代表支持任意服务商的专有语音接口。DeepSeek聊天地址不能直接当作转写地址。模型ID不是品牌名：DeepSeek官方对话通常使用 `deepseek-chat`，而不是 `DeepSeek`。HTTP400/422会提示检查模型ID和格式，404/405会提示检查接口和模型，不会再笼统称为临时故障。
-
-家庭自用先不建后端。请使用独立 API 密钥，并在服务商设置余额、预算或额度限制。手机加密存储不等于密钥绝对安全。一次语音任务可能包含多次 API 调用：原始语音、意图理解、确认语音、最终回答/识图。
+然后将其转为单行 Base64，在 GitHub 仓库 **Settings → Secrets and variables → Actions** 中添加 4 个 Repository Secrets：
+- `SIGNING_KEYSTORE_BASE64`：`.jks` 文件的 Base64 内容
+- `SIGNING_STORE_PASSWORD`：keystore 密码
+- `SIGNING_KEY_ALIAS`：`littlecompanion`
+- `SIGNING_KEY_PASSWORD`：key 密码
 
 ## 权限与隐私
 
 - 悬浮窗：家人手动开启，前台服务提供常驻通知。
 - 麦克风：仅在可见语音面板内按需录制；切换到其他 APP 时停止，屏幕授权流程除外。
-- 通知：Android 13+ 建议允许，方便了解和关闭后台服务。
-- 屏幕：每次需要时申请系统许可，不持久保存授权。Android 新版本可能每次都需确认。
-- 本应用不申请无障碍、联系人、存储访问或定位权限。导航定位由选定地图负责。
-- 截图可能包含姓名、地址、订单信息，会上传到配置的模型服务；截图本身不落盘。
-- 录音写入应用私有缓存，转写结束、取消录音或下次进程启动时清理。进程异常退出后可能暂留至下次启动。
-- 上一条回答仅保存在进程内存，重启或点击“清除临时记录”即清除。
-- 第三方服务是否保留上传数据，取决于其隐私政策，本应用不能代其保证不保存。
-
-## 工具链（尚未下载或执行）
-
-建议 Android Studio + JDK 17 + Android SDK Platform 35，项目采用 Android Gradle Plugin 8.6.1，配套 Gradle 8.7。
-
-未放入 Gradle Wrapper JAR，因为那是需要外部获取的二进制。请勿误以为项目中已经存在 `gradlew`。
-
-需要用户同意后再进行构建环境检测、依赖准备或 APK 构建。外网文件按照用户规则由用户手动下载：
-
-- Android Studio：<https://developer.android.com/studio>，用途：编辑、Android SDK、构建工具。
-- Gradle 8.7：<https://services.gradle.org/distributions/gradle-8.7-bin.zip>，用途：无已有 Gradle 时的构建工具。
-- SDK 和 Maven 工件也属于外部下载；未经用户确认不能通过 Android Studio 或 Gradle 静默自动拉取。
-
-有完整的本地依赖缓存后，可以在得到许可的情况下运行离线构建。没有缓存时应停下说明缺少项，不能擅自联网下载。不要把 API 密钥填入源代码、构建参数或共享截图。
-
-## 首次手机使用（待 APK 编译通过后）
-
-1. 家人填写接口、密钥和模型并保存。
-2. 选择语音识别方式，检查中文系统播报。
-3. 允许麦克风、悬浮窗和通知。
-4. 点击“在这里试问一句”验证闭环。
-5. 打开悬浮球，返回购物 APP 商品页，点击问价格。
-6. 确认复述后，在系统屏幕授权中选择共享整个屏幕。不要选择“小伴”自身窗口。
-7. 不清楚、黑屏或页面受保护时，不根据回答付款，应人工核对。
-8. 地图功能先由家人陪同测试，不用于无人陪同的首次路测。
+- 定位：仅在同意高德隐私说明并使用无地图步行导航时申请 `ACCESS_FINE_LOCATION` / `ACCESS_COARSE_LOCATION`，由 `WalkNaviService` 前台定位服务在导航期间使用。
+- 通知：Android 13+ 建议允许，方便了解和关闭悬浮球、屏幕共享与步行导航服务。
+- 屏幕：首次授权后当前会话复用，关闭悬浮窗或共享通知结束；截图不落盘。
+- 家庭自用限制：高德个人开发者免费配额仅限非商业个人/家庭自用，不得用于商业运营；首次导航务必由家人陪同测试。
 
 ## 文件结构
 
-`MainActivity` 简洁首页；`SettingsActivity` 家人设置；`OverlayService` 悬浮球；`AssistantActivity` 对话状态流程；`VoiceInput` 录音/识别；`VoiceOutput` 系统播报和音频焦点；`ApiClient` HTTPS接口；`AssistantBrain` 意图和回答规则；`ScreenCaptureService` 单帧屏幕捕获；`MapLauncher` 外部地图入口。
+`MainActivity` 简洁首页；`SettingsActivity` 家人设置与截图预览诊断；`OverlayService` 悬浮球；`AssistantActivity` 对话状态、重播、点空白关闭与导航确认；`VoiceInput` 录音/识别；`VoiceOutput` 系统播报与导航语音焦点；`ApiClient` HTTPS 接口；`AssistantBrain` 意图和回答规则；`ScreenCaptureService` 单帧屏幕捕获；`AmapNavigator` 高德定位与 POI 搜索；`WalkNaviService` 无地图前台步行导航服务；`MapLauncher` 外部地图备用入口。
 
-验收项目见 `docs/TEST-CHECKLIST.md`。此阶段没有 APK、签名文件或性能测试结果，不能把代码中的设计目标当作已验证能力。
+验收项目见 `docs/TEST-CHECKLIST.md`。

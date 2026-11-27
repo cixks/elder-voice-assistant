@@ -10,8 +10,23 @@ android {
         applicationId 'cn.family.littlecompanion'
         minSdk 26
         targetSdk 35
-        versionCode 3
-        versionName '0.3.0'
+        versionCode 4
+        versionName '0.4.0'
+        ndk {
+            abiFilters 'armeabi-v7a', 'arm64-v8a'
+        }
+    }
+
+    signingConfigs {
+        fixed {
+            def storePath = System.getenv('SIGNING_KEYSTORE_PATH') ?: findProperty('SIGNING_KEYSTORE_PATH')
+            if (storePath) {
+                storeFile file(storePath)
+                storePassword System.getenv('SIGNING_STORE_PASSWORD') ?: findProperty('SIGNING_STORE_PASSWORD')
+                keyAlias System.getenv('SIGNING_KEY_ALIAS') ?: findProperty('SIGNING_KEY_ALIAS')
+                keyPassword System.getenv('SIGNING_KEY_PASSWORD') ?: findProperty('SIGNING_KEY_PASSWORD')
+            }
+        }
     }
 
     compileOptions {
@@ -20,8 +35,20 @@ android {
     }
 
     buildTypes {
+        debug {
+            if (signingConfigs.fixed.storeFile != null) {
+                signingConfig signingConfigs.fixed
+            }
+        }
         release {
             minifyEnabled false
+            if (signingConfigs.fixed.storeFile != null) {
+                signingConfig signingConfigs.fixed
+            }
         }
     }
+}
+
+dependencies {
+    implementation 'com.amap.api:navi-3dmap-location-search:latest.integration'
 }

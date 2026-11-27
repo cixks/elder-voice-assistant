@@ -22,6 +22,24 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
+      - name: Configure fixed APK signing
+        shell: bash
+        env:
+          SIGNING_KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "$SIGNING_KEYSTORE_BASE64" ] || [ -z "$SIGNING_STORE_PASSWORD" ] || [ -z "$SIGNING_KEY_ALIAS" ] || [ -z "$SIGNING_KEY_PASSWORD" ]; then
+            echo "::error::Fixed signing secrets are missing. Configure SIGNING_KEYSTORE_BASE64, SIGNING_STORE_PASSWORD, SIGNING_KEY_ALIAS, and SIGNING_KEY_PASSWORD in repository Actions secrets."
+            exit 1
+          fi
+          keystore_path="$RUNNER_TEMP/littlecompanion-fixed.jks"
+          printf '%s' "$SIGNING_KEYSTORE_BASE64" | base64 --decode > "$keystore_path"
+          echo "SIGNING_KEYSTORE_PATH=$keystore_path" >> "$GITHUB_ENV"
+          echo "Fixed signing certificate fingerprints (bind SHA1 in Amap Console):"
+          keytool -list -v -keystore "$keystore_path" -alias "$SIGNING_KEY_ALIAS" -storepass "$SIGNING_STORE_PASSWORD" | grep -E 'SHA1:|SHA256:' || true
       - name: Install Android build tools
         shell: bash
         run: |
@@ -36,6 +54,10 @@ jobs:
           "$sdk_manager" 'platforms;android-35' 'build-tools;35.0.0'
           echo "sdk.dir=$sdk_root" > local.properties
       - name: Build debug APK
+        env:
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
         run: gradle --no-daemon assembleDebug
       - name: Prepare family trial package
         run: cp app/build/outputs/apk/debug/app-debug.apk elder-voice-assistant.apk

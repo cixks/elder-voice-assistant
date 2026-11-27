@@ -1,8 +1,8 @@
 package cn.family.littlecompanion;
 
 import android.app.Activity;
-import android.app.Service;
 import android.app.PendingIntent;
+import android.app.Service;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.graphics.Bitmap;
@@ -14,11 +14,12 @@ import android.media.ImageReader;
 import android.media.projection.MediaProjection;
 import android.media.projection.MediaProjectionManager;
 import android.os.Build;
+import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.ResultReceiver;
-import android.os.Bundle;
+import android.os.SystemClock;
 import android.util.Base64;
 import android.util.DisplayMetrics;
 import android.view.WindowManager;
@@ -31,7 +32,9 @@ public final class ScreenCaptureService extends Service {
     static final String EXTRA_RECEIVER = "receiver";
     static final String ACTION_STOP = "cn.family.littlecompanion.STOP_CAPTURE";
     private static volatile boolean sessionActive;
+    private static volatile String lastDiagnostic = "";
     static boolean hasSession() { return sessionActive; }
+    static String lastDiagnostic() { return lastDiagnostic; }
     private final Handler handler = new Handler(Looper.getMainLooper());
     private MediaProjection projection;
     private VirtualDisplay display;
@@ -39,6 +42,7 @@ public final class ScreenCaptureService extends Service {
     private ResultReceiver receiver;
     private boolean finished, requesting;
     private boolean sawBlankFrame;
+    private long requestStartedAt;
     // Same-process hand-off avoids putting a large image through Binder's transaction limit.
     private static String pendingImage;
     private static final Handler imageExpiry = new Handler(Looper.getMainLooper());
@@ -109,6 +113,8 @@ public final class ScreenCaptureService extends Service {
             }, handler);
             // Wait for the permission dialog and assistant panel to leave.
             requesting = true;
+            sawBlankFrame = false;
+            requestStartedAt = SystemClock.elapsedRealtime();
             handler.postDelayed(() -> {
                 if (finished || projection == null || reader == null) return;
                 try {
@@ -125,6 +131,7 @@ public final class ScreenCaptureService extends Service {
     private void requestFrame() {
         if (receiver == null) return;
         requesting = true; sawBlankFrame = false;
+        requestStartedAt = SystemClock.elapsedRealtime();
         handler.removeCallbacks(captureTimeout);
         // Replace just the output surface, not the virtual display or the authorization token.
         // This prompts a fresh frame even when the underlying shopping page is static.
@@ -144,13 +151,20 @@ public final class ScreenCaptureService extends Service {
     private String encode(Image frame) throws Exception {
         Image.Plane plane = frame.getPlanes()[0];
         ByteBuffer buffer = plane.getBuffer();
-        int paddedWidth = plane.getRowStride() / plane.getPixelStride();
+        buffer.rewind();
+        int pixelStride = Math.max(1, plane.getPixelStride());
+        int paddedWidth = Math.max(frame.getWidth(), plane.getRowStride() / pixelStride);
         Bitmap padded = null, cropped = null;
         try {
             padded = Bitmap.createBitmap(paddedWidth, frame.getHeight(), Bitmap.Config.ARGB_8888);
             padded.copyPixelsFromBuffer(buffer);
             cropped = Bitmap.createBitmap(padded, 0, 0, frame.getWidth(), frame.getHeight());
-            if (isNearlyBlack(cropped)) return null;
+            int darkPercent = darkSamplePercent(cropped);
+            long elapsed = SystemClock.elapsedRealtime() - requestStartedAt;
+            lastDiagnostic = frame.getWidth() + "x" + frame.getHeight()
+                    + "，行距=" + plane.getRowStride() + "/" + pixelStride
+                    + "，暗像素=" + darkPercent + "%，耗时=" + elapsed + "ms";
+            if (darkPercent >= 98) return null;
             try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
                 cropped.compress(Bitmap.CompressFormat.JPEG, 85, output);
                 return Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP);
@@ -161,7 +175,7 @@ public final class ScreenCaptureService extends Service {
         }
     }
 
-    private static boolean isNearlyBlack(Bitmap bitmap) {
+    private static int darkSamplePercent(Bitmap bitmap) {
         int dark = 0, samples = 0;
         // Ignore the outer margins (status/navigation bars and the floating button).
         for (int row = 1; row < 20; row++) {
@@ -173,7 +187,7 @@ public final class ScreenCaptureService extends Service {
                 samples++;
             }
         }
-        return dark >= samples * 0.98;
+        return samples == 0 ? 100 : Math.round(dark * 100f / samples);
     }
 
     private void fail(String message) {

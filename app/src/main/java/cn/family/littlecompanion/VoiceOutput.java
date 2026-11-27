@@ -22,13 +22,20 @@ final class VoiceOutput {
     private final java.util.function.Consumer<String> error;
 
     VoiceOutput(Context context, Settings settings, java.util.function.Consumer<String> error, Runnable interrupted) {
+        this(context, settings, false, error, interrupted);
+    }
+
+    VoiceOutput(Context context, Settings settings, boolean navigation,
+                java.util.function.Consumer<String> error, Runnable interrupted) {
         this.error = error;
         audio = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
-        AudioAttributes attributes = new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT)
+        AudioAttributes attributes = new AudioAttributes.Builder()
+                .setUsage(navigation ? AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE : AudioAttributes.USAGE_ASSISTANT)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build();
-        focus = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+        int focusType = navigation ? AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK : AudioManager.AUDIOFOCUS_GAIN_TRANSIENT;
+        focus = new AudioFocusRequest.Builder(focusType)
                 .setAudioAttributes(attributes).setOnAudioFocusChangeListener(change -> {
-                    if (change == AudioManager.AUDIOFOCUS_LOSS || change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
+                    if (change == AudioManager.AUDIOFOCUS_LOSS || (!navigation && change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT)) {
                         stop(); interrupted.run();
                     }
                 }, handler).build();
