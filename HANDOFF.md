@@ -1,13 +1,22 @@
 # 小伴安卓语音助手：跨会话交接
 
-更新日期：2026-11-27（0.4.0 本地开发已写入，待用户配置固定签名 Secrets 并授权后触发云端编译）。
+更新日期：2026-11-27。以下最新状态优先于下文历史记录。
+
+## 最新授权与发布状态
+
+- 用户明确要求：**以后推送就自动编译**。工作流已改为main分支push自动构建并发布，保留手动入口。无需重复询问云端编译许可，不要push后再dispatch造成双份构建。
+- 外网文件下载和手机安装仍遵循原约束；云端构建依赖下载已获许可。
+- 0.4.0修复高德SDK四处编译错误后已发布，提交 `3b9bc1d`，APK：`https://github.com/cixks/elder-voice-assistant/releases/download/trial-7-1/elder-voice-assistant.apk`。
+- 用户已解决识图和400。当前排查高德1008，用户确认MT提取SHA1正确、旧版已卸载重装，不要反复认定用户抄错。
+- 高德诊断功能提交 `f1e98c0` 已推送：设置页查看当前安装包名/证书SHA1、权限、版本、已保存Key与最近SDK配置Key的脱敏摘要，无完整Key、不自动上传、不发起网络请求。
+- 固定签名流程已经存在，缺失Secrets会构建失败；不要误报仍必然使用随机签名。实际覆盖兼容性需要核对证书。
 
 ## 1. 项目与用户操作约束
 
 - 本地：`F:\opencode项目\elder-voice-assistant`
 - GitHub：`https://github.com/cixks/elder-voice-assistant`，分支 `main`。
 - 0.3.0（提交 `1feed34`）云端构建 run `45948293895` 已成功，Release `trial-5-1` 下载直链：`https://github.com/cixks/elder-voice-assistant/releases/download/trial-5-1/elder-voice-assistant.apk`（大小 `56908` 字节）。
-- 新一轮编译前仍需询问用户；外网文件不自行下载；PAT 仅从 `F:\opencode项目\gh_token.txt` 读取，绝不输出内容或写入仓库。
+- 推送main即授权自动云端编译；外网文件不自行下载；PAT 仅从 `F:\opencode项目\gh_token.txt` 读取，绝不输出内容或写入仓库。
 - 没有授权启动子代理。
 
 ## 2. 本轮 0.4.0 已实现的本地变更（未编译、未真机验证）
