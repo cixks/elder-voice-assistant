@@ -16,6 +16,7 @@ import com.amap.api.services.core.PoiItemV2;
 import com.amap.api.services.core.ServiceSettings;
 import com.amap.api.services.poisearch.PoiResultV2;
 import com.amap.api.services.poisearch.PoiSearchV2;
+import com.amap.api.services.poisearch.VisualSearchResult;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -173,7 +174,7 @@ final class AmapNavigator {
                             }
                             String title = safe(item.getTitle());
                             if (title.isEmpty()) continue;
-                            candidates.add(new Candidate(title, safe(item.getAddress()), safe(item.getCityName()),
+                            candidates.add(new Candidate(title, safe(item.getSnippet()), safe(item.getCityName()),
                                     safe(item.getPoiId()), pt.getLatitude(), pt.getLongitude(), dist));
                             if (candidates.size() >= 3) break;
                         }
@@ -182,6 +183,7 @@ final class AmapNavigator {
                 }
 
                 @Override public void onPoiItemSearched(PoiItemV2 item, int rCode) { }
+                @Override public void onVisualSearched(VisualSearchResult result, int rCode) { }
             });
             search.searchPOIAsyn();
         } catch (Exception e) {
@@ -197,7 +199,7 @@ final class AmapNavigator {
             Location net = lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER);
             if (gps != null && net != null) return gps.getTime() >= net.getTime() ? gps : net;
             return gps != null ? gps : net;
-        } catch (SecurityException | RuntimeException ignored) {
+        } catch (RuntimeException ignored) {
             return null;
         }
     }

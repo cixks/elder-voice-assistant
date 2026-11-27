@@ -159,7 +159,7 @@ public final class WalkNaviService extends Service {
 
         @Override public void onNaviInfoUpdate(NaviInfo info) {
             if (destroyed || info == null) return;
-            String road = safe(info.getCurRoadName());
+            String road = safe(info.getCurrentRoadName());
             int remainMeters = info.getPathRetainDistance();
             int remainMinutes = Math.max(1, Math.round(info.getPathRetainTime() / 60f));
             int stepMeters = info.getCurStepRetainDistance();
