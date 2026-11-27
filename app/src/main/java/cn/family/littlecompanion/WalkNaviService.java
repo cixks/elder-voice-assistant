@@ -16,6 +16,8 @@ import com.amap.api.navi.AMapNavi;
 import com.amap.api.navi.SimpleNaviListener;
 import com.amap.api.navi.enums.NaviType;
 import com.amap.api.navi.model.AMapCalcRouteResult;
+import com.amap.api.navi.model.AMapNaviLocation;
+import com.amap.api.navi.model.AMapNaviPath;
 import com.amap.api.navi.model.NaviInfo;
 import com.amap.api.navi.model.NaviLatLng;
 
@@ -58,6 +60,8 @@ public final class WalkNaviService extends Service {
     private Settings settings;
     private VoiceOutput voice;
     private AMapNavi navi;
+    private WalkDirectionOverlay directionOverlay;
+    private AMapNaviPath directionPath;
     private PowerManager.WakeLock wakeLock;
     private String destName = "";
     private double destLat, destLng, fromLat, fromLng;
@@ -98,6 +102,9 @@ public final class WalkNaviService extends Service {
         routeStarted = false;
         lastInstruction = "正在规划前往" + destName + "的步行路线";
         lastSummary = "无需打开地图页面，直接为您语音指路";
+        if (!android.provider.Settings.canDrawOverlays(this)) {
+            lastSummary += "\n顶部方向箭头需要开启小伴的悬浮窗权限；语音导航仍可使用";
+        }
 
         Notification notification = buildNotification(destName.isEmpty() ? "步行导航" : "前往 " + destName, lastInstruction);
         if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION);
@@ -110,6 +117,7 @@ public final class WalkNaviService extends Service {
 
     private void startAmapNavi() {
         cleanupNavi();
+        directionOverlay = new WalkDirectionOverlay(this);
         try {
             AmapNavigator.prepare(this, settings);
             navi = AMapNavi.getInstance(getApplicationContext());
@@ -136,9 +144,13 @@ public final class WalkNaviService extends Service {
 
         @Override public void onCalculateRouteSuccess(AMapCalcRouteResult result) {
             if (destroyed || navi == null) return;
+            directionPath = navi.getNaviPath();
+            if (directionOverlay != null) directionOverlay.waiting("路线已就绪，等待当前位置");
             routeStarted = true;
             lastInstruction = "路线已规划好，开始步行导航";
-            lastSummary = "请跟随语音提示前行";
+            lastSummary = android.provider.Settings.canDrawOverlays(WalkNaviService.this)
+                    ? "请跟随语音提示前行，顶部箭头随手机朝向转动"
+                    : "语音导航可用；顶部箭头需要开启小伴的悬浮窗权限";
             publish(true, destName, lastInstruction, lastSummary);
             updateNotification("前往 " + destName, lastInstruction);
             navi.startNavi(NaviType.GPS);
@@ -172,8 +184,28 @@ public final class WalkNaviService extends Service {
             publish(true, destName, lastInstruction, lastSummary);
         }
 
+        @Override public void onLocationChange(AMapNaviLocation location) {
+            if (destroyed || directionOverlay == null) return;
+            // SDK callbacks are marshalled to the UI thread before touching sensors/windows.
+            handler.post(() -> {
+                if (destroyed || directionOverlay == null) return;
+                Long time = location == null ? null : location.getTime();
+                long age = time == null ? Long.MAX_VALUE : System.currentTimeMillis() - time;
+                if (!routeStarted || location == null || age < -5000 || age > 10000
+                        || !Float.isFinite(location.getAccuracy()) || location.getAccuracy() <= 0
+                        || location.getAccuracy() > 35) {
+                    directionOverlay.waiting("定位确认中，请到开阔处稍候");
+                    return;
+                }
+                WalkRouteDirection direction = WalkRouteDirection.calculate(directionPath, location);
+                directionOverlay.update(direction, location);
+            });
+        }
+
         @Override public void onReCalculateRouteForYaw() {
             if (destroyed) return;
+            directionPath = null;
+            if (directionOverlay != null) directionOverlay.waiting("偏离路线，正在重新规划");
             lastInstruction = "检测到偏离路线，正在为您重新规划";
             publish(true, destName, lastInstruction, lastSummary);
             speak(lastInstruction);
@@ -185,6 +217,7 @@ public final class WalkNaviService extends Service {
             lastInstruction = msg;
             lastSummary = "到达目的地";
             publish(false, destName, msg, lastSummary);
+            closeDirectionOverlay();
             if (navi != null) { try { navi.stopNavi(); } catch (Exception ignored) { } }
             speakAndStop(msg);
         }
@@ -205,7 +238,9 @@ public final class WalkNaviService extends Service {
     }
 
     private void failNavigation(String message) {
-        if (routeStarted) return;
+        // A failed recalculation must not leave an old arrow or an active-looking route.
+        closeDirectionOverlay();
+        if (navi != null) { try { navi.stopNavi(); } catch (Exception ignored) { } }
         lastInstruction = message;
         lastSummary = "步行导航未能开始";
         publish(false, destName, message, lastSummary);
@@ -213,6 +248,7 @@ public final class WalkNaviService extends Service {
     }
 
     private void stopNavigation(String reason) {
+        closeDirectionOverlay();
         lastInstruction = reason;
         publish(false, destName, reason, "");
         stopSelf();
@@ -254,12 +290,18 @@ public final class WalkNaviService extends Service {
     }
 
     private void cleanupNavi() {
+        closeDirectionOverlay();
         if (navi != null) {
             try { navi.stopNavi(); } catch (Exception ignored) { }
             try { navi.removeAMapNaviListener(naviListener); } catch (Exception ignored) { }
             try { navi.destroy(); } catch (Exception ignored) { }
             navi = null;
         }
+    }
+
+    private void closeDirectionOverlay() {
+        directionPath = null;
+        if (directionOverlay != null) { directionOverlay.close(); directionOverlay = null; }
     }
 
     @Override public void onDestroy() {
