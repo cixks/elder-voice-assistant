@@ -2,7 +2,6 @@ package cn.family.littlecompanion;
 
 import android.content.Context;
 import android.location.Location;
-import android.location.LocationManager;
 import android.os.Handler;
 import android.os.Looper;
 import com.amap.api.location.AMapLocationClient;
@@ -40,7 +39,7 @@ final class AmapNavigator {
         String label(int index) {
             StringBuilder text = new StringBuilder();
             text.append(index).append(". ").append(title);
-            if (distanceMeters >= 0) text.append("（").append(formatDistance(distanceMeters)).append("）");
+            if (distanceMeters >= 0) text.append("（直线约").append(formatDistance(distanceMeters)).append("）");
             if (!address.isEmpty()) text.append("\n").append(address);
             return text.toString();
         }
@@ -106,36 +105,37 @@ final class AmapNavigator {
         try {
             locationClient = new AMapLocationClient(app);
         } catch (Exception e) {
-            searchPoi(app, keyword, "", false, 0, 0, callback);
+            callback.onError("没能获取当前位置，请检查定位开关后再试");
             return;
         }
         AMapLocationClientOption option = new AMapLocationClientOption();
         option.setLocationMode(AMapLocationClientOption.AMapLocationMode.Hight_Accuracy);
         option.setOnceLocation(true);
+        option.setOnceLocationLatest(true);
+        option.setLocationCacheEnable(false);
         option.setNeedAddress(true);
-        option.setHttpTimeOut(5000);
+        option.setHttpTimeOut(10000);
         locationClient.setLocationOption(option);
         Runnable timeout = () -> {
             if (completed[0]) return;
             completed[0] = true;
             destroyClient(locationClient);
-            Location fallback = lastKnownLocation(app);
-            if (fallback != null) searchPoi(app, keyword, "", true, fallback.getLatitude(), fallback.getLongitude(), callback);
-            else searchPoi(app, keyword, "", false, 0, 0, callback);
+            callback.onError("当前位置还没定位好，请到信号较好的地方再试，不会改为全国搜索");
         };
-        handler.postDelayed(timeout, 5500);
+        handler.postDelayed(timeout, 12000);
         locationClient.setLocationListener(location -> {
             if (completed[0]) return;
             completed[0] = true;
             handler.removeCallbacks(timeout);
             destroyClient(locationClient);
-            if (location != null && location.getErrorCode() == 0) {
+            if (location != null && location.getErrorCode() == 0 && location.hasAccuracy()
+                    && location.getAccuracy() > 0 && location.getAccuracy() <= 1000
+                    && System.currentTimeMillis() - location.getTime() >= -5000
+                    && System.currentTimeMillis() - location.getTime() <= 120000) {
                 String city = location.getCity() != null ? location.getCity() : "";
                 searchPoi(app, keyword, city, true, location.getLatitude(), location.getLongitude(), callback);
             } else {
-                Location fallback = lastKnownLocation(app);
-                if (fallback != null) searchPoi(app, keyword, "", true, fallback.getLatitude(), fallback.getLongitude(), callback);
-                else searchPoi(app, keyword, "", false, 0, 0, callback);
+                callback.onError("当前位置不够准确，请检查定位并到信号较好的地方再试");
             }
         });
         locationClient.startLocation();
@@ -146,11 +146,18 @@ final class AmapNavigator {
     }
 
     private static void searchPoi(Context app, String keyword, String city, boolean hasOrigin, double originLat, double originLng, SearchCallback callback) {
+        searchNearby(app, keyword, city, hasOrigin, originLat, originLng, 5000, callback);
+    }
+
+    private static void searchNearby(Context app, String keyword, String city, boolean hasOrigin, double originLat,
+                                    double originLng, int radius, SearchCallback callback) {
+        if (!hasOrigin) { callback.onError("请先获取当前位置，再搜索附近地点"); return; }
         PoiSearchV2.Query query = new PoiSearchV2.Query(keyword, "", city);
-        query.setPageSize(5);
+        query.setPageSize(25);
         query.setPageNum(1);
         try {
             PoiSearchV2 search = new PoiSearchV2(app, query);
+            search.setBound(new PoiSearchV2.SearchBound(new LatLonPoint(originLat, originLng), radius, true));
             search.setOnPoiSearchListener(new PoiSearchV2.OnPoiSearchListener() {
                 @Override public void onPoiSearched(PoiResultV2 result, int rCode) {
                     if (rCode != AMapException.CODE_AMAP_SUCCESS) {
@@ -158,10 +165,6 @@ final class AmapNavigator {
                         return;
                     }
                     List<PoiItemV2> raw = result != null ? result.getPois() : null;
-                    if ((raw == null || raw.isEmpty()) && !city.isEmpty()) {
-                        searchPoi(app, keyword, "", hasOrigin, originLat, originLng, callback);
-                        return;
-                    }
                     List<Candidate> candidates = new ArrayList<>();
                     if (raw != null) {
                         for (PoiItemV2 item : raw) {
@@ -175,11 +178,21 @@ final class AmapNavigator {
                             }
                             String title = safe(item.getTitle());
                             if (title.isEmpty()) continue;
+                            if (dist > radius) continue;
                             candidates.add(new Candidate(title, safe(item.getSnippet()), safe(item.getCityName()),
                                     safe(item.getPoiId()), pt.getLatitude(), pt.getLongitude(), dist));
-                            if (candidates.size() >= 3) break;
                         }
                     }
+                    if (candidates.isEmpty() && radius == 5000) {
+                        searchNearby(app, keyword, city, hasOrigin, originLat, originLng, 10000, callback);
+                        return;
+                    }
+                    candidates.sort((left, right) -> Integer.compare(left.distanceMeters, right.distanceMeters));
+                    if (candidates.isEmpty()) {
+                        callback.onError("附近10公里没找到匹配地点，请换个称呼或说出具体名称");
+                        return;
+                    }
+                    if (candidates.size() > 3) candidates = new ArrayList<>(candidates.subList(0, 3));
                     callback.onSuccess(new SearchResult(hasOrigin, originLat, originLng, candidates));
                 }
 
@@ -189,19 +202,6 @@ final class AmapNavigator {
             search.searchPOIAsyn();
         } catch (Exception e) {
             callback.onError("高德地点搜索启动失败，请检查高德密钥或网络");
-        }
-    }
-
-    private static Location lastKnownLocation(Context context) {
-        try {
-            LocationManager lm = (LocationManager) context.getSystemService(Context.LOCATION_SERVICE);
-            if (lm == null) return null;
-            Location gps = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER);
-            Location net = lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER);
-            if (gps != null && net != null) return gps.getTime() >= net.getTime() ? gps : net;
-            return gps != null ? gps : net;
-        } catch (RuntimeException ignored) {
-            return null;
         }
     }
 
